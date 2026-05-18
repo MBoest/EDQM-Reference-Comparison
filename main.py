@@ -11,9 +11,11 @@ import xml.etree.ElementTree as ET
 
 
 pathxl = Path(".") / "input_file" / "example_reference_substances.xlsx"
-pathxml = Path(".") / "edqm_catalogue_destination" / "web_catalog_XML.xml"
+path_edqm = Path(".") / "catalogues" / "web_catalog_XML.xml"
+path_usp = Path(".") / "catalogues" / "usprefstd.csv"
 
-url = "https://crs.edqm.eu/db/4DCGI/web_catalog_XML.xml"
+url_edqm = "https://crs.edqm.eu/db/4DCGI/web_catalog_XML.xml"
+url_usp = "https://static.usp.org/doc/referenceStandards/usprefstd.csv"
 
 worksheet_name = "Reference Substances"
 
@@ -34,6 +36,9 @@ def create_df(ws) -> pd.DataFrame:
         "Substance Received Index": [
             ws.cell(row=i, column=3).value for i in range(start_row, ws.max_row + 1)
         ],
+        "Substance": [
+            ws.cell(row=i, column=4).value for i in range(start_row, ws.max_row + 1)
+        ],
         "Article No.": [
             ws.cell(row=i, column=5).value for i in range(start_row, ws.max_row + 1)
         ],
@@ -53,17 +58,25 @@ def create_df(ws) -> pd.DataFrame:
 def filter_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(by="Substance Specific Code")
 
-    df_crs_in_stock = df[
+    df_refs_in_stock = df[
         df["In Stock"].str.contains("yes", case=False, na=False)
-        & df["Category"].str.contains("CRS", case=False, na=False)
+        & 
+            df["Category"].str.contains("CRS|USP", case=False, na=False)
     ].copy()
 
-    df_crs_in_stock["In Stock"] = df_crs_in_stock["In Stock"].str.strip()
-    df_crs_in_stock["Category"] = df_crs_in_stock["Category"].str.strip()
-    df_crs_in_stock["Article No."] = df_crs_in_stock["Article No."].str.strip()
+    df_refs_in_stock["In Stock"] = df_refs_in_stock["In Stock"].astype("string").str.strip()
+    df_refs_in_stock["Category"] = df_refs_in_stock["Category"].astype("string").str.strip()
+    df_refs_in_stock["Article No."] = df_refs_in_stock["Article No."].astype("string").str.strip()
 
-    df_crs_in_stock["Supplier Batch No."] = (
-        df_crs_in_stock["Supplier Batch No."]
+    # Only clean letters from edqm codes
+    mask_edqm = df_refs_in_stock["Category"].str.contains(
+    "CRS",
+    case=False,
+    na=False
+    )
+    
+    df_refs_in_stock.loc[mask_edqm, "Supplier Batch No."] = (
+        df_refs_in_stock.loc[mask_edqm, "Supplier Batch No."]
         .astype("string")
         .str.replace(r"[A-Za-z]", "", regex=True)
         .str.lstrip("0")
@@ -71,16 +84,16 @@ def filter_df(df: pd.DataFrame) -> pd.DataFrame:
         .str[0]
     )
 
-    return df_crs_in_stock
+    return df_refs_in_stock
 
-def download_edqm_xml(url: str) -> None:
+def download_catalogue(url: str, destination: Path) -> None:
     try:
-        response = requests.get(url, timeout=30)
+        response = requests.get(url, timeout=90)
         response.raise_for_status()
     except requests.RequestException as e:
         raise ValueError(f"Download failed: {e}") from e
 
-    with open(pathxml, "wb") as file:
+    with open(destination, "wb") as file:
         file.write(response.content)
 
 def read_xml_file(pathxml: Path) -> pd.DataFrame:
@@ -98,17 +111,24 @@ def read_xml_file(pathxml: Path) -> pd.DataFrame:
 
         edqm_references.append({
             "Article No.": order_code,
-            "Current EDQM Batch": batch_edqm,
+            "Current Batch": batch_edqm,
             })
     
     return pd.DataFrame(edqm_references)
 
-def compare_batchnumbers(edqm_references: pd.DataFrame, own_references: pd.DataFrame) -> pd.DataFrame:
-    shared_codes = pd.merge(own_references, edqm_references, on="Article No.", how="left",
+def read_csv_file(pathcsv: Path) -> pd.DataFrame:
+    df = pd.read_csv(pathcsv)
+    df = df[["Catalog #", "Current Lot"]]
+    df = df.rename(columns={"Catalog #": "Article No.", "Current Lot": "Current Batch"})
+
+    return df
+
+def compare_batchnumbers(own_references: pd.DataFrame, current_catalogue: pd.DataFrame) -> pd.DataFrame:
+    shared_codes = pd.merge(own_references, current_catalogue, on="Article No.", how="left",
     )
 
     return shared_codes[
-        shared_codes["Supplier Batch No."] != shared_codes["Current EDQM Batch"]
+        shared_codes["Supplier Batch No."] != shared_codes["Current Batch"]
     ]
 
 def write_edqm_check_to_workbook(wb: ox.Workbook, standards_to_check_df: pd.DataFrame, file_path: Path) -> None:
@@ -122,9 +142,6 @@ def write_edqm_check_to_workbook(wb: ox.Workbook, standards_to_check_df: pd.Data
     df = standards_to_check_df.copy()
 
     df.columns = [str(col) for col in df.columns]
-
-    if len(df.columns) != len(set(df.columns)):
-        raise ValueError("DataFrame enthält doppelte Spaltennamen.")
 
     for row in dataframe_to_rows(df, index=False, header=True):
         ws.append(row)
@@ -175,17 +192,23 @@ if __name__ == "__main__":
 
     ws = wb[worksheet_name]
 
-    df = create_df(ws)
+    own_references_df = create_df(ws)
 
-    if df.empty:
-        raise ValueError("No DataFrame created")
+    if own_references_df.empty:
+        raise ValueError("Empty DataFrame")
 
-    df_filtered = filter_df(df)
+    own_references_df_filtered = filter_df(own_references_df)
 
-    download_edqm_xml(url)
-    edqm_references_df = read_xml_file(pathxml)
+    download_catalogue(url_edqm, path_edqm)
+    download_catalogue(url_usp, path_usp)
 
-    standards_to_check_df = compare_batchnumbers(edqm_references_df, df_filtered)
+    edqm_references_df = read_xml_file(path_edqm)
+    usp_references_df = read_csv_file(path_usp)
+
+    catalogues = [edqm_references_df, usp_references_df]
+    combined_catalogues = pd.concat(catalogues)
+
+    standards_to_check_df = compare_batchnumbers(own_references=own_references_df_filtered, current_catalogue=combined_catalogues)
 
     write_edqm_check_to_workbook(
         wb=wb,

@@ -1,12 +1,13 @@
-# EDQM Reference Batch Check
+# Reference Batch Check
 
-Automates comparison between internal EDQM reference standard inventory
-and current EDQM catalogue batch information.
+Automates comparison between internal EDQM and USP reference standard inventory
+and current EDQM and USP catalogue batch information.
 
 ## Features
 
 - Download current EDQM XML catalogue
-- Compare local inventory batches with current EDQM batches
+- Download the current USP CSV catalogue
+- Compare local inventory batches with current batches
 - Detect potentially outdated standards
 - Generate formatted Excel report worksheets
 - Standalone executable support
@@ -21,8 +22,9 @@ and current EDQM catalogue batch information.
 
 1. Load inventory workbook
 2. Download EDQM XML catalogue
-3. Compare batch numbers
-4. Create a new Excel worksheet containing discrepancies
+3. Download USP CSV catalogue
+4. Compare batch numbers
+5. Create a new Excel worksheet containing discrepancies
 
 ## Tech Stack
 
@@ -58,8 +60,8 @@ and worksheet name in `main.py` according to the local file structure.
 Example:
 
 ```python
-pathxl = Path(r"\\network_drive\QC\ReferenceSubstances.xlsx")
-pathxml = Path(r"C:\Temp\web_catalog_XML.xml")
+patt_edqm = Path(r"\\network_drive\QC\ReferenceSubstances.xlsx")
+path_usp = Path(r"C:\Temp\web_catalog_XML.xml")
 ```
 
 ## Installation
@@ -87,5 +89,5 @@ pyinstaller --onefile --name EDQM_comparison main.py
 
 ## Disclaimer
 
-This tool only compares current EDQM batches and does not evaluate
+This tool only compares current EDQM and USP batches and does not evaluate
 official Batch Validity Statements (BVS).
