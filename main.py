@@ -97,24 +97,17 @@ def download_catalogue(url: str, destination: Path) -> None:
         file.write(response.content)
 
 def read_xml_file(pathxml: Path) -> pd.DataFrame:
-    tree = ET.parse(pathxml)
-    root = tree.getroot()
+    df = pd.read_xml(pathxml)
+    df = df[["Order_Code", "Batch_No"]]
 
-    edqm_references = []
+    # convert float like 6.0 to str 6
+    df = df.dropna()
+    df["Batch_No"] = df["Batch_No"].astype(int)
+    df["Batch_No"] = df["Batch_No"].astype(str)
 
-    for ref in root.findall("Reference"):
-        order_code = ref.get("Order_Code")
-        batch_edqm = ref.find("Batch_No")
-        if batch_edqm is None or batch_edqm.text is None:
-          continue
-        batch_edqm = batch_edqm.text
+    df = df.rename(columns={"Order_Code": "Article No.", "Batch_No": "Current Batch"})
 
-        edqm_references.append({
-            "Article No.": order_code,
-            "Current Batch": batch_edqm,
-            })
-    
-    return pd.DataFrame(edqm_references)
+    return df
 
 def read_csv_file(pathcsv: Path) -> pd.DataFrame:
     df = pd.read_csv(pathcsv)
@@ -131,7 +124,7 @@ def compare_batchnumbers(own_references: pd.DataFrame, current_catalogue: pd.Dat
         shared_codes["Supplier Batch No."] != shared_codes["Current Batch"]
     ]
 
-def write_edqm_check_to_workbook(wb: ox.Workbook, standards_to_check_df: pd.DataFrame, file_path: Path) -> None:
+def write_check_to_workbook(wb: ox.Workbook, standards_to_check_df: pd.DataFrame, file_path: Path) -> None:
     sheet_name = f"EDQM_check_{dt.date.today():%Y_%m_%d}"
 
     if sheet_name in wb.sheetnames:
@@ -210,7 +203,7 @@ if __name__ == "__main__":
 
     standards_to_check_df = compare_batchnumbers(own_references=own_references_df_filtered, current_catalogue=combined_catalogues)
 
-    write_edqm_check_to_workbook(
+    write_check_to_workbook(
         wb=wb,
         standards_to_check_df=standards_to_check_df,
         file_path=pathxl,
